@@ -1,0 +1,147 @@
+# Configuration
+
+## Environment Variables
+
+| Variable                  | Default           | Description                                                                         |
+| ------------------------- | ----------------- | ----------------------------------------------------------------------------------- |
+| `METRO_HOST`              | `localhost`       | Metro bundler host                                                                  |
+| `METRO_PORT`              | `8081`            | Metro bundler port                                                                  |
+| `METRO_MCP_PROJECT_ROOT`  | canonicalized CWD | Project directory used for config discovery, relative paths, and daemon identity    |
+| `METRO_MCP_CONFIG`        | —                 | Path to config file (absolute or relative to the project root)                      |
+| `METRO_MCP_PLUGINS`       | —                 | Colon-separated plugin paths to load (relative paths resolve from the project root) |
+| `METRO_MCP_PROXY_ENABLED` | `true`            | Enable the CDP proxy for Chrome DevTools coexistence                                |
+| `METRO_MCP_PROXY_PORT`    | `0` (random)      | Fixed port for the CDP proxy. Use `0` for a random available port                   |
+| `METRO_MCP_MCP_PORT`      | `0` (random)      | Fixed port for `metro-mcp serve` Streamable HTTP endpoint                           |
+| `METRO_MCP_MULTIPLEX`     | `true`            | Set to `false` to run the legacy single-process stdio server                        |
+| `DEBUG`                   | —                 | Enable debug logging                                                                |
+
+## CLI Arguments
+
+```bash
+npx -y metro-mcp --host 192.168.1.100 --port 19000
+# or
+bunx metro-mcp --host 192.168.1.100 --port 19000
+```
+
+| Argument         | Description                                            |
+| ---------------- | ------------------------------------------------------ |
+| `--host`, `-H`   | Metro bundler host                                     |
+| `--port`, `-p`   | Metro bundler port                                     |
+| `--config`, `-c` | Path to config file (overrides `METRO_MCP_CONFIG`)     |
+| `--plugin`       | Load a plugin by path (repeatable)                     |
+| `--project-root` | Project directory (overrides `METRO_MCP_PROJECT_ROOT`) |
+| `--mcp-port`     | Port for `metro-mcp serve`                             |
+| `--stdio-direct` | Disable stdio multiplexing for this process            |
+
+## Multi-client and HTTP mode
+
+Standard stdio configuration is still recommended for Codex, Claude Code, Cursor, VS Code, and OpenCode:
+
+```json
+{
+  "mcpServers": {
+    "metro-mcp": {
+      "command": "npx",
+      "args": ["-y", "metro-mcp"]
+    }
+  }
+}
+```
+
+Each stdio process connects to a shared local daemon when the project directory and Metro/config options match. For tools that need an explicit HTTP endpoint, run:
+
+```bash
+npx -y metro-mcp serve --mcp-port 8765
+```
+
+Streamable HTTP is available at `http://127.0.0.1:8765/mcp` for both supported client eras. `/sse` and `/messages` return `404`.
+
+## Config File
+
+metro-mcp looks for `metro-mcp.config.ts` (or `.js`) in the effective project root. The root is selected in this order: `--project-root`, `METRO_MCP_PROJECT_ROOT`, then the canonicalized launch CWD. A daemon is always bound to one project root; changing projects requires a new launch/reconnection.
+
+::: tip TypeScript vs JavaScript
+`metro-mcp.config.ts` only works when running via `bunx` (Bun runtime). Use `metro-mcp.config.js` if running via `npx` / Node.js.
+:::
+
+To use a project from another working directory, set the project root explicitly:
+
+```json
+{
+  "mcpServers": {
+    "metro-mcp": {
+      "command": "bunx",
+      "args": ["metro-mcp", "--project-root", "/Users/you/my-project"],
+      "env": {}
+    }
+  }
+}
+```
+
+Or via CLI:
+
+```bash
+claude mcp add metro-mcp -- bunx metro-mcp --project-root /Users/you/my-project
+```
+
+Run with `DEBUG=1` to see exactly where the server is looking for config:
+
+```bash
+DEBUG=1 bunx metro-mcp
+# logs: Project root: /some/path
+# logs: Loaded config from /full/path/metro-mcp.config.ts
+```
+
+Create the config file:
+
+```typescript
+import { defineConfig } from 'metro-mcp';
+
+export default defineConfig({
+  metro: {
+    host: 'localhost',
+    port: 8081,
+    autoDiscover: true, // Scan common ports automatically
+  },
+  plugins: [],
+  bufferSizes: {
+    logs: 500,
+    network: 200,
+    errors: 100,
+  },
+  network: {
+    interceptFetch: false, // Opt-in: inject JS to wrap fetch()
+  },
+  proxy: {
+    enabled: true, // CDP proxy for Chrome DevTools coexistence
+    port: 0, // 0 = random available port
+  },
+  profiler: {
+    newArchitecture: true, // Set to false for legacy bridge apps
+  },
+});
+```
+
+## CDP Proxy Options
+
+The CDP proxy allows Chrome DevTools to connect alongside the MCP, working around Hermes's single-connection limitation. See the [Chrome DevTools](/guide/getting-started#chrome-devtools) section for details.
+
+| Option          | Default | Description                                                                                                                                                       |
+| --------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `proxy.enabled` | `true`  | Enable the CDP proxy server. When enabled, external debuggers (Chrome DevTools, etc.) can connect to the proxy port and share the Hermes connection with the MCP. |
+| `proxy.port`    | `0`     | Port for the proxy's WebSocket + HTTP server. `0` picks a random available port. Set a fixed port if you need a stable URL.                                       |
+
+The proxy also serves a `/json` endpoint for Chrome's target auto-discovery and a `/json/version` endpoint.
+
+## Profiler Options
+
+| Option                     | Default | Description                                                                                                                                                                                                                                                                              |
+| -------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `profiler.newArchitecture` | `true`  | Controls which profiling path is used. When `true` (default), `__REACT_DEVTOOLS_GLOBAL_HOOK__` is used as the primary path — works on all architectures including Bridgeless/Fusebox. When `false`, CDP `Profiler.*` domain calls are attempted first (suitable for legacy bridge apps). |
+
+### Which value should I use?
+
+- **Expo SDK 50+ / RN 0.74+ (New Architecture / Bridgeless)**: keep `true` (default)
+- **Legacy bridge apps on older RN / Hermes**: set to `false` — the CDP Profiler domain may be available and provides a lower-overhead CPU call-graph
+
+The server also auto-detects Fusebox targets via the `prefersFuseboxFrontend` CDP capability and skips CDP fallbacks automatically, regardless of this setting.

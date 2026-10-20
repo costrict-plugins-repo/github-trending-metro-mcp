@@ -1,0 +1,211 @@
+# Getting Started
+
+metro-mcp is a plugin-based MCP server for React Native runtime debugging, inspection, and automation. It connects to Metro bundler via Chrome DevTools Protocol — **no app code changes needed** for most features.
+
+Works with **Expo**, **bare React Native**, and any project using **Metro + Hermes**.
+
+## Requirements
+
+- **Node.js** 18+ or **Bun** 1.0+
+- **iOS**: Xcode 14+ with Simulator (`xcrun simctl` is used for most operations)
+- **Android**: Android SDK with `adb` on your PATH
+- **IDB** _(optional)_: Some iOS operations fall back to [IDB (idb-companion)](https://github.com/facebook/idb) — install with `brew install idb-companion`. Tools will tell you when IDB is needed.
+
+Native input providers can be selected in `metro-mcp.config.ts` without installing anything automatically:
+
+```ts
+export default {
+  input: {
+    nativeBackend: 'auto', // 'auto' | 'simview' | 'idb'
+    // Commands may include literal arguments; paths containing spaces may be quoted.
+    // simviewCommand: '/path/to/simview', // the `mcp` subcommand is added when omitted
+    // idbCommand: '/path/to/idb',
+  },
+};
+```
+
+On iOS, `auto` uses the packaged SimView MCP interface when available and falls back to supported IDB commands. Coordinates are logical screen points and are normalized against the selected device's current geometry.
+
+Provider discovery only runs read-only probes. IDB installations that do not implement `--version` are accepted when their help output advertises the supported UI commands.
+
+## Installation
+
+### Claude Code
+
+```bash
+claude mcp add metro-mcp -- npx -y metro-mcp
+# or with Bun
+claude mcp add metro-mcp -- bunx metro-mcp
+```
+
+### Codex
+
+```bash
+codex mcp add metro-mcp -- npx -y metro-mcp
+# or with Bun
+codex mcp add metro-mcp -- bunx metro-mcp
+```
+
+Codex stores MCP servers in `~/.codex/config.toml` by default, and the Codex CLI and IDE extension share that configuration. If you want to add the server manually, use:
+
+```toml
+[mcp_servers.metro-mcp]
+command = "npx"
+args = ["-y", "metro-mcp"]
+```
+
+### OpenCode
+
+Run OpenCode's interactive MCP installer:
+
+```bash
+opencode mcp add
+```
+
+Choose a local server, name it `metro-mcp`, and use `npx -y metro-mcp` as the command.
+
+If you prefer to configure it manually, add this to `opencode.json` in your project, or to `~/.config/opencode/opencode.json` for a global install:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "metro-mcp": {
+      "type": "local",
+      "command": ["npx", "-y", "metro-mcp"],
+      "enabled": true
+    }
+  }
+}
+```
+
+Or with Bun:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "metro-mcp": {
+      "type": "local",
+      "command": ["bunx", "metro-mcp"],
+      "enabled": true
+    }
+  }
+}
+```
+
+### Cursor / VS Code
+
+```json
+{
+  "mcpServers": {
+    "metro-mcp": {
+      "command": "npx",
+      "args": ["-y", "metro-mcp"]
+    }
+  }
+}
+```
+
+Or use the one-click install buttons:
+
+[![Install in VS Code](https://img.shields.io/badge/Install_in-VS_Code-0098FF?style=flat-square&logo=visualstudiocode&logoColor=white)](https://vscode.dev/redirect/mcp/install?name=metro-mcp&config=%7B%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22metro-mcp%22%5D%2C%22env%22%3A%7B%7D%7D)
+[![Install in Cursor](https://img.shields.io/badge/Install_in-Cursor-000000?style=flat-square&logoColor=white)](https://cursor.com/en/install-mcp?name=metro-mcp&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIm1ldHJvLW1jcCJdLCJlbnYiOnt9fQ==)
+
+### Install across multiple agents
+
+If you use several MCP clients, [`add-mcp`](https://github.com/neondatabase/add-mcp) can write the config for supported agents, including Claude Code, Codex, Cursor, OpenCode, and VS Code:
+
+```bash
+npx add-mcp metro-mcp --all -g -y
+```
+
+### With a config file
+
+metro-mcp automatically discovers `metro-mcp.config.ts` (or `.js`) from the effective project root. The root is `--project-root`, then `METRO_MCP_PROJECT_ROOT`, then the canonicalized working directory.
+
+```bash
+# Install metro-mcp as usual
+claude mcp add metro-mcp -- bunx metro-mcp
+```
+
+To point the MCP server at a different project, pass the project root explicitly:
+
+```bash
+claude mcp add metro-mcp -- bunx metro-mcp --project-root /Users/you/my-project
+```
+
+See [Configuration](/configuration) for all options.
+
+### With a custom Metro port
+
+```bash
+claude mcp add metro-mcp -- npx -y metro-mcp --port 19000
+codex mcp add metro-mcp -- npx -y metro-mcp --port 19000
+```
+
+For OpenCode, add the port to the command array:
+
+```json
+"command": ["npx", "-y", "metro-mcp", "--port", "19000"]
+```
+
+## How It Works
+
+metro-mcp connects to your running Metro dev server the same way Chrome DevTools does:
+
+1. Discovers Metro via port scanning (8081, 8082, 19000–19002)
+2. Connects to Hermes via Chrome DevTools Protocol (CDP)
+3. Streams console logs, network requests, and errors into buffers
+4. Exposes everything as MCP tools, resources, and prompts
+
+**No app modifications required** for core debugging features.
+
+## Compatibility
+
+|                  | Supported                                                 |
+| ---------------- | --------------------------------------------------------- |
+| **React Native** | 0.70+ (Hermes required)                                   |
+| **Expo**         | SDK 49+                                                   |
+| **Node.js**      | 18+                                                       |
+| **Bun**          | 1.0+                                                      |
+| **Platforms**    | iOS Simulator, Android Emulator, physical devices via USB |
+
+## Chrome DevTools
+
+Hermes only allows a **single CDP connection** at a time. metro-mcp solves this with a built-in **CDP proxy** that multiplexes the connection, letting Chrome DevTools and the MCP coexist.
+
+Use the `open_devtools` MCP tool instead of pressing **"j"** in Metro or tapping **"Open Debugger"** in the dev menu — those will steal the connection and disconnect the MCP.
+
+The proxy is enabled by default. To configure it:
+
+```bash
+# Fixed proxy port
+METRO_MCP_PROXY_PORT=9222 npx metro-mcp
+
+# Disable the proxy
+METRO_MCP_PROXY_ENABLED=false npx metro-mcp
+```
+
+## Claude Code Status Bar
+
+Get live Metro connection status in your Claude Code status bar.
+
+Run `setup_statusline` in Claude Code — it writes a script to `~/.claude/metro-mcp-statusline.sh`, then:
+
+```
+/statusline add the script at ~/.claude/metro-mcp-statusline.sh
+```
+
+| State                  | Display                          |
+| ---------------------- | -------------------------------- |
+| Not running            | `Metro ○` (dimmed)               |
+| Running, not connected | `Metro ●` (red)                  |
+| Connected              | `Metro ● localhost:8081` (green) |
+
+## Next Steps
+
+- [Configuration](/configuration) — environment variables, CLI args, config file
+- [App Integration (SDK)](/sdk) — optional SDK for enhanced features
+- [Tools Reference](/tools) — all available MCP tools
+- [Custom Plugins](/plugins) — extend metro-mcp with your own tools
